@@ -1,9 +1,10 @@
 {
   "app_id": "tictactoe",
   "display_name": "Tic-Tac-Toe",
-  "version": "1.0",
+  "version": "1.0.0",
   "author": "XTtictac",
   "description": "Tic-tac-toe for two players on one reader, played with the buttons. P1 is X, P2 is O; the first player alternates every game.",
   "entry": "index.lua",
+  "api": "2.0",
   "permissions": []
 }

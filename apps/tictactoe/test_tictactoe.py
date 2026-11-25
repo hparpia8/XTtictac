@@ -11,12 +11,12 @@ src = open(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os
 
 HOST = r'''
 W, H = 480, 800
-cmds, texts, now, quits, fulls, invals = 0, {}, 100000, 0, 0, 0
+cmds, texts, now, quits, invals = 0, {}, 100000, 0, 0
 low, high = 0, 0                                     -- the smallest and largest coordinate drawn
 local function seen(v) if v < low then low = v end; if v > high then high = v end end
--- as on the X4 Classic: only these calls, no polyline, rect outlines only and not under 3 px
+-- only these calls: rect outlines, not under 3 px, and no fill or polyline
 ALLOWED = { clear = true, line = true, rect = true, circle = true, text = true }
-g = setmetatable({}, {__index = function(_, k)
+canvas = setmetatable({}, {__index = function(_, k)
   return function(self, ...)
     if k == 'size' then return W, H end
     if k == 'measure_text' then local s = ...; return 13 * utf8.len(s), 24 end
@@ -29,9 +29,10 @@ g = setmetatable({}, {__index = function(_, k)
     if k == 'circle' then assert(a[3] > 0); seen(a[1] - a[3]); seen(a[2] + a[3]) end
     for i = 1, a.n do assert(math.type(a[i]) ~= 'float', 'a float in g:' .. k) end
   end end})
-ctx = { state = {}, screen = { width = W, height = H }, sys = { millis = function() return now end },
-        invalidate = function() invals = invals + 1 end, quit = function() quits = quits + 1 end,
-        display = { full_refresh = function(self) assert(self == ctx.display, 'full_refresh is a method'); fulls = fulls + 1 end } }
+ctx = { state = {}, screen = { width = W, height = H },
+        clock = { millis = function(self) assert(self == ctx.clock, 'a method'); return now end },
+        invalidate = function(self) assert(self == ctx, 'a method'); invals = invals + 1 end,
+        quit = function(self) assert(self == ctx, 'a method'); quits = quits + 1 end }
 __TEST = {}
 '''
 
@@ -59,13 +60,13 @@ class App:
     def key(self, *names):
         for n in names:
             self.rt.execute('now = now + 1000')
-            r = self.event(type='key', key=n, state='down')
-            self.event(type='key', key=n, state='up')
-        return r
+            self.event(type='key', key=n, phase='down')
+            r = self.event(type='key', key=n, phase='up')
+        return r                                       # the answer to the last release
 
     def draw(self):
         self.rt.execute('cmds = 0; texts = {}; low = 0; high = 0')
-        self.rt.eval('on_draw')(self.rt.eval('ctx'), self.rt.eval('g'))
+        self.rt.eval('on_draw')(self.rt.eval('ctx'), self.rt.eval('canvas'))
         assert self.api.err() is None, self.api.err()
         texts = list(self.rt.eval('texts').values())
         return texts                                   # the turn line and the banner are painted, not text
@@ -134,18 +135,18 @@ def run(lua, name):
     # --- a fresh launch: game 1, P1, empty board, whatever ctx.state holds
     a.rt.execute("ctx.state = { board = { 'X', 'X', 'O' }, number = 7 }"); a.load()
     assert a.board() == '.........' and a.m.number == 1 and a.m.starter == 'X' and a.m.turn == 'X' and a.m.focus == 1
-    texts = a.draw(); assert texts == ['Restart', 'Game 1', 'P1 0 - 0 P2'], texts
+    texts = a.draw(); assert texts == ['Game 1', 'P1 0 - 0 P2'], texts
     a.play([5]); a.load(); assert a.board() == '.........' and a.m.number == 1
 
     # --- the focus ring: order, skipped cells, wrapping both ways
     def ring(m): return list(api.focus_ring(m).values())
-    assert ring(a.m) == [1, 2, 3, 4, 5, 6, 7, 8, 9, R]
+    assert ring(a.m) == [1, 2, 3, 4, 5, 6, 7, 8, 9]          # no Restart before the first move
     seen = []
-    for _ in range(10): seen.append(a.m.focus); a.key('right')
+    for _ in range(9): seen.append(a.m.focus); a.key('right')
     assert seen == ring(a.m) and a.m.focus == 1
-    a.key('left'); assert a.m.focus == R
     a.key('left'); assert a.m.focus == 9
-    a.play([2, 5])
+    a.key('next'); assert a.m.focus == 9                       # nothing below it yet
+    a.play([2, 5]); assert 'Restart' in a.draw()
     assert a.board() == '.X..O....' and ring(a.m) == [1, 3, 4, 6, 7, 8, 9, R]
     a.goto(1); a.key('right'); assert a.m.focus == 3
     a.key('right', 'right'); assert a.m.focus == 6
@@ -158,15 +159,15 @@ def run(lua, name):
     a.play([2, 4]); assert a.m.focus == 5
     # --- side keys: the X4 Classic's prev / next, then the same as up / down
     a.load(); a.key('next'); assert a.m.focus == 4
-    a.key('next', 'next'); assert a.m.focus == R
+    a.key('next', 'next'); assert a.m.focus == 7               # Restart is not there yet
+    a.load(); a.play([2]); a.goto(4); a.key('next', 'next'); assert a.m.focus == R
+    a.key('next'); assert a.m.focus == R
     a.key('prev'); assert a.m.focus == 9                       # Restart is at the bottom right
-    a.goto(7)
-    a.key('prev', 'prev', 'prev'); assert a.m.focus == 1
-    a.play([4]); a.goto(1); a.key('next'); assert a.m.focus == 5       # 4 is filled: the nearest in that row
+    a.key('prev'); assert a.m.focus == 6
+    a.load(); a.play([4]); a.goto(1); a.key('next'); assert a.m.focus == 5       # 4 is filled: the nearest in that row
     a.load(); a.key('down'); assert a.m.focus == 4
-    a.key('down', 'down'); assert a.m.focus == R
-    a.key('down'); assert a.m.focus == R
-    a.key('up'); assert a.m.focus == 9
+    a.key('down'); assert a.m.focus == 7
+    a.key('up'); assert a.m.focus == 4
     a.goto(9); a.key('up', 'up'); assert a.m.focus == 3
     a.key('up'); assert a.m.focus == 3
     def rs(cells, focus, d):
@@ -201,7 +202,7 @@ def run(lua, name):
         assert a.m.confirm is None and a.m.number == game and a.m.starter == starter == a.m.turn and a.board() == '.........'
         assert a.m.focus == 1
         p = 'P1' if starter == 'X' else 'P2'
-        assert a.draw() == ['Restart', f'Game {game}', f'P1 {game // 2} - {(game - 1) // 2} P2'] and api.headline(a.m) == f"{p}'s turn ({starter})"
+        assert a.draw() == [f'Game {game}', f'P1 {game // 2} - {(game - 1) // 2} P2'] and api.headline(a.m) == f"{p}'s turn ({starter})"
         a.play([1, 4, 2, 5, 3]); assert a.m.winner == starter and a.m.state == 'GAME_OVER'
     assert api.tally(a.m) == 'P1 3 - 3 P2'
     # the tally: kept by a draw and by Restart in the middle of a game, back to 0 - 0 on a new launch
@@ -214,8 +215,6 @@ def run(lua, name):
     # with two digits it stays clear of Restart on the same line (13 px a letter, as measured above)
     L = api.layout(480, 800); assert L.info_x + 13 * len('P1 12 - 10 P2') < L.restart.x and L.tally_y + 24 <= 800
     assert L.by + 3 * L.cell < L.over.y and L.over.y + L.over.h < L.game_y
-    # the same on an empty board: Restart at once, starter flipped
-    a.load(); a.goto(R); a.key('ok'); assert a.m.confirm is None and a.m.number == 2 and a.m.turn == 'O'
     print('game over, starter alternation OK')
 
     # --- the turn line: every letter is there
@@ -226,12 +225,9 @@ def run(lua, name):
     ASK = 'Quit this round?'
     for how in ('restart', 'back'):
         def ask():
-            if how == 'back': a.key('back')
+            if how == 'back': assert a.key('back') is True
             else: a.goto(R); a.key('ok')
         action = 'restart' if how == 'restart' else 'exit'
-        # empty board: at once
-        a.load(); q = a.n('quits'); ask(); assert a.m.confirm is None and ASK not in a.draw()
-        assert a.n('quits') == q + (how != 'restart') and a.m.number == (2 if how == 'restart' else 1)
         # mid-game: asks, Cancel first
         a.load(); a.play([5, 1]); q = a.n('quits'); ask()
         assert a.draw() == [ASK, 'Cancel', 'Yes', 'Restart', 'Game 1', 'P1 0 - 0 P2'], a.draw()
@@ -239,17 +235,26 @@ def run(lua, name):
         focus = a.m.focus
         a.key('up', 'down', 'next', 'prev'); assert a.m.confirm.choice == 'cancel'
         a.key('ok'); assert a.m.confirm is None and a.board() == 'O...X....' and a.m.focus == focus and a.n('quits') == q
-        # Back cancels, from either choice
+        # Back cancels, from either choice, and the app stays
+        ask(); assert a.key('back') is True and a.m.confirm is None
         ask(); a.key('right'); assert a.m.confirm.choice == 'yes'
-        a.key('back'); assert a.m.confirm is None and a.board() == 'O...X....' and a.n('quits') == q
+        assert a.key('back') is True and a.m.confirm is None and a.board() == 'O...X....' and a.n('quits') == q
         # Left / Right switch and wrap; then Yes
         ask(); a.key('left'); assert a.m.confirm.choice == 'yes'
         a.key('right'); assert a.m.confirm.choice == 'cancel'
         a.key('right', 'ok'); assert a.m.confirm is None
         if action == 'restart': assert a.m.number == 2 and a.m.starter == 'O' and a.board() == '.........' and a.n('quits') == q
         else: assert a.n('quits') == q + 1
-    # after a game Back, where a host delivers it, leaves at once
-    a.load(); a.play([1, 4, 2, 5, 3]); q = a.n('quits'); a.key('back'); assert a.m.confirm is None and a.n('quits') == q + 1
+    # with no round in progress Back is left to the host, which closes the app
+    a.load(); inv = a.n('invals'); assert a.key('back') is False and a.m.confirm is None and a.n('invals') == inv
+    a.load(); a.play([1, 4, 2, 5, 3]); assert a.key('back') is False and a.m.state == 'GAME_OVER' and a.m.number == 1
+    # it acts on the release only, and a bounce of it does not close the question again
+    def back(dt, phase): a.rt.execute(f'now = now + {dt}'); return a.event(type='key', key='back', phase=phase)
+    a.load(); a.play([5]); assert back(1000, 'down') is True and a.m.confirm is None
+    assert back(300, 'repeat') is True and a.m.confirm is None
+    assert back(300, 'up') is True and a.m.confirm is not None
+    assert back(5, 'down') is True and back(5, 'up') is True and a.m.confirm is not None
+    assert back(400, 'down') is True and back(90, 'up') is True and a.m.confirm is None
     print('confirm: only mid-game; Cancel, Back, Yes for Restart / Back OK')
 
     # --- debounce: the same key within 250 ms once, another key at once, releases ignored
@@ -267,7 +272,7 @@ def run(lua, name):
     t += 1000; at(0, 'right'); assert a.m.focus == 4                         # no phase at all
     t += 1000; at(0, 'right', state='up'); at(20, 'right', state='down'); assert a.m.focus == 5   # a release does not debounce
     a.load(); a.event(type='key', key='right', state='down'); a.event(type='key', key='right', state='down')
-    assert a.m.focus == 2                                                    # without time_ms: ctx.sys.millis
+    assert a.m.focus == 2                                                    # without time_ms: ctx.clock
     a.rt.execute('now = now + 300'); a.event(type='key', key='right', state='down'); assert a.m.focus == 3
     a.load(); t += 1000; at(0, 'right', state='down'); at(10, 'down', state='down'); at(20, 'next', state='down')
     assert a.m.focus == 8                                                    # other buttons, even with the same action
@@ -302,7 +307,6 @@ def run(lua, name):
     a.load(); a.play([1, 2, 3, 5, 4, 6, 8, 7, 9]); assert a.m.state == 'GAME_OVER'
     inv = a.n('invals'); a.key('up'); assert a.n('invals') == inv            # nothing changed, nothing redrawn
     a.key('ok'); assert a.m.number == 2 and a.n('invals') == inv + 1
-    assert a.n('fulls') == 0
     print('refreshes OK')
 
     # --- every state draws, within the frame's 1024 commands and the screen, on several screens
@@ -326,10 +330,10 @@ def run(lua, name):
     a.rt.execute("ALLOWED.circle = true")
 
     # --- an error is painted, not thrown; keys then go to the host
-    a.rt.execute("ctx.sys.millis = function() error('boom') end")
+    a.rt.execute("ctx.clock.millis = function() error('boom') end")
     assert a.rt.eval('on_input')(None, a.rt.table_from({'type': 'key', 'key': 'right', 'state': 'down'})) is True
     assert 'boom' in api.err()
-    a.rt.execute('texts = {}'); a.rt.eval('on_draw')(); assert 'boom' in ''.join(a.rt.eval('texts').values())
+    a.rt.execute('texts = {}'); a.rt.eval('on_draw')(None, a.rt.eval('canvas')); assert 'boom' in ''.join(a.rt.eval('texts').values())
     assert a.rt.eval('on_input')(None, a.rt.table_from({'type': 'key', 'key': 'back', 'state': 'down'})) is False
     print('error screen OK')
 

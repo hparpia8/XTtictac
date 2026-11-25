@@ -7,7 +7,7 @@ Two-player tic-tac-toe for Xteink e-readers running the stock XT Licorice firmwa
 
 | Reader | Status |
 |---|---|
-| X4 Classic, Licorice 20261118 | Works |
+| X4 Classic, Licorice 20261124 | Works (API 2.0) |
 | Other Licorice readers with Left, Right and Select buttons | Untested. The package installs only if the firmware uses the same package key. |
 | Touch-only readers | Not playable: touch is ignored and a Select button is needed |
 

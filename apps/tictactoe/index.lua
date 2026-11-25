@@ -1,16 +1,17 @@
--- Tic-tac-toe for two players, for XTOS Licorice mini apps (Lua API 0.8, portrait, 1 bpp).
+-- Tic-tac-toe for two players, for XTOS Licorice mini apps (Lua API 2.0, portrait, 1 bpp).
 -- Written for the button-only Xteink X4 Classic; touch and pointer events are ignored.
 --
 -- P1 is X and P2 is O. The first player alternates every game; each launch starts at game 1 with
--- P1. One cursor (the focus) moves over the empty cells, then Restart; after a game it is in the "New
--- game?" box, where Yes starts the next game and No leaves the app. Mid-game, the host's Back leaves.
+-- P1. One cursor (the focus) moves over the empty cells, then Restart once a move was made; after a game
+-- it is in the "New game?" box, where Yes starts the next game and No leaves the app.
 --
--- Host facts this file relies on, seen on an X4 Classic with XTOS Licorice 20261118 (apps/keyprobe):
--- g:rect draws an outline only (its fill option is ignored), g:polyline raises an error, g:text has
--- one size, y at the TOP of its ~24 px line box, and takes { color = 0 } for white. So black boxes
--- are made of nested outlines and lines. ctx.invalidate and ctx.quit are plain functions (dot).
--- A frame keeps its first 1024 drawing commands and drops the rest. { color = 0 } draws white lines
--- and circles too.
+-- Host facts: every ctx function is a method, and the canvas comes with on_draw only. The host reads the
+-- answer to a Back release: true keeps the app open, false closes it, without a question (seen on an X4
+-- Classic with XTOS Licorice 20261124). g:text takes the TOP of its ~24 px line box. { color = 0 } draws
+-- white. A frame keeps its first 1024 drawing commands and drops the rest. Solid shapes are made of nested
+-- outlines and lines, which API 0.8 needed and 2.0 draws the same.
+
+local g                                              -- the canvas, from on_draw
 
 -- Every key name the app knows, with what it does. Confirmed on the X4 Classic: left, right and ok
 -- (front; system menus label left / right Up and Down) and prev, next (the side buttons).
@@ -20,7 +21,7 @@ local KEYMAP = {
   prev  = 'up',                                      -- the side buttons jump a row
   next  = 'down',
   ok    = 'select',
-  back  = 'back',                                    -- X4 Classic: never delivered, the host asks "Leave app"
+  back  = 'back',                                    -- see back_impl
   up    = 'up',                                      -- X4 Pro side buttons
   down  = 'down',
 }
@@ -59,7 +60,7 @@ local function focus_ring(m)
   if m.state == 'GAME_OVER' then return { YES, NO } end
   local ring = {}
   for i = 1, 9 do if not m.board[i] then ring[#ring + 1] = i end end
-  ring[#ring + 1] = RESTART
+  if m.moves > 0 then ring[#ring + 1] = RESTART end
   return ring
 end
 
@@ -93,7 +94,7 @@ local function row_step(m, dir)
     if cell then return cell end
     row = row + dir
   end
-  if dir > 0 and m.focus <= 9 then return RESTART end
+  if dir > 0 and m.focus <= 9 and m.moves > 0 then return RESTART end
   return m.focus
 end
 
@@ -482,28 +483,41 @@ local function draw_impl()
   else turn_text(L.cx, h.y + h.h // 2, headline(M)) end
   if M.confirm then draw_confirm(L, M) else draw_board(L, M) end
   if over then draw_over(L, M)
-  else draw_button(L.restart, 'Restart', M.focus == RESTART and not M.confirm) end
+  elseif M.moves > 0 then draw_button(L.restart, 'Restart', M.focus == RESTART and not M.confirm) end
   g:text(L.info_x, L.game_y, 'Game ' .. M.number)
   g:text(L.info_x, L.tally_y, tally(M))
 end
 
 -- Only the fast refresh is asked for. Full ones are left to the reader, which does one by itself every so
--- many refreshes (a setting); ctx.display:full_refresh was not seen to flash on the X4 Classic.
+-- many refreshes (a setting).
 local function apply(effect)
   if not effect then return end
-  if effect == 'quit' then ctx.quit(); return end
-  pcall(ctx.invalidate)
+  if effect == 'quit' then ctx:quit(); return end
+  ctx:invalidate()
 end
 
 local function event_ms(ev)
   if type(ev.time_ms) == 'number' then return ev.time_ms end
-  return ctx.sys.millis()                            -- the X4 Classic's key events carry no time
+  return ctx.clock:millis()
+end
+
+-- Back acts when let go: it closes the question, asks it in the middle of a game, or leaves the app.
+local function back_impl(ev)
+  local st = ev.phase or ev.state
+  if st and not RELEASED[st] then return true end
+  if not accept(ev.key, event_ms(ev)) then return true end
+  local effect
+  M, effect = press(M, 'back')
+  if effect == 'quit' then return false end          -- the host closes the app
+  apply(effect)
+  return true
 end
 
 local function input_impl(ev)
   if type(ev) ~= 'table' or ev.type ~= 'key' then return false end   -- touch and pointer: not ours
   local key = KEYMAP[ev.key]
   if not key then return false end
+  if key == 'back' then return back_impl(ev) end
   if not is_press(ev) then return true end
   if not accept(ev.key, event_ms(ev)) then return true end
   local effect
@@ -538,7 +552,7 @@ function on_load()
 end
 
 function on_draw(_, canvas)
-  if canvas then g = canvas end
+  g = canvas
   if ERR then draw_error(); return end
   local ok, err = pcall(draw_impl)
   if not ok then ERR = 'on_draw: ' .. tostring(err); pcall(draw_error) end
@@ -549,7 +563,7 @@ function on_input(_, ev)
   local ok, res = pcall(input_impl, ev)
   if ok then return res end
   ERR = 'on_input: ' .. tostring(res)
-  pcall(ctx.invalidate)
+  pcall(function() ctx:invalidate() end)
   return true
 end
 
