@@ -547,6 +547,7 @@ local function draw_error()
 end
 
 function on_load()
+  ERR = nil
   local ok, err = pcall(load_impl)
   if not ok then ERR = 'on_load: ' .. tostring(err) end
 end

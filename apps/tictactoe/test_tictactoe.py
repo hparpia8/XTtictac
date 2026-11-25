@@ -12,8 +12,12 @@ src = open(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os
 HOST = r'''
 W, H = 480, 800
 cmds, texts, now, quits, invals = 0, {}, 100000, 0, 0
-low, high = 0, 0                                     -- the smallest and largest coordinate drawn
-local function seen(v) if v < low then low = v end; if v > high then high = v end end
+outside, text_outside = {}, {}                       -- what was drawn past an edge of the screen
+local function extent(list, what, x1, y1, x2, y2)    -- x2, y2: the last pixel
+  if math.min(x1, x2) < 0 or math.min(y1, y2) < 0 or math.max(x1, x2) >= W or math.max(y1, y2) >= H then
+    list[#list + 1] = ('%s %d,%d %d,%d'):format(what, x1, y1, x2, y2)
+  end
+end
 -- only these calls: rect outlines, not under 3 px, and no fill or polyline
 ALLOWED = { clear = true, line = true, rect = true, circle = true, text = true }
 canvas = setmetatable({}, {__index = function(_, k)
@@ -23,10 +27,13 @@ canvas = setmetatable({}, {__index = function(_, k)
     assert(ALLOWED[k], 'not on the device: g:' .. k)
     cmds = cmds + 1
     local a = table.pack(...)
-    if k == 'text' then texts[#texts+1] = a[3]; seen(a[1]); seen(a[2]) end
-    if k == 'line' then for i = 1, 4 do seen(a[i]) end end
-    if k == 'rect' then assert(a.n == 4 and a[3] >= 3 and a[4] >= 3); seen(a[1]); seen(a[2]); seen(a[1] + a[3]); seen(a[2] + a[4]) end
-    if k == 'circle' then assert(a[3] > 0); seen(a[1] - a[3]); seen(a[2] + a[3]) end
+    if k == 'text' then texts[#texts+1] = a[3]; extent(text_outside, a[3], a[1], a[2], a[1] + 13 * utf8.len(a[3]) - 1, a[2] + 23) end
+    if k == 'line' then extent(outside, k, a[1], a[2], a[3], a[4]) end
+    if k == 'rect' then
+      assert(a.n == 4 and a[3] >= 3 and a[4] >= 3)
+      extent(outside, k, a[1], a[2], a[1] + a[3] - 1, a[2] + a[4] - 1)
+    end
+    if k == 'circle' then assert(a[3] > 0); extent(outside, k, a[1] - a[3], a[2] - a[3], a[1] + a[3], a[2] + a[3]) end
     for i = 1, a.n do assert(math.type(a[i]) ~= 'float', 'a float in g:' .. k) end
   end end})
 ctx = { state = {}, screen = { width = W, height = H },
@@ -65,7 +72,7 @@ class App:
         return r                                       # the answer to the last release
 
     def draw(self):
-        self.rt.execute('cmds = 0; texts = {}; low = 0; high = 0')
+        self.rt.execute('cmds = 0; texts = {}; outside = {}; text_outside = {}')
         self.rt.eval('on_draw')(self.rt.eval('ctx'), self.rt.eval('canvas'))
         assert self.api.err() is None, self.api.err()
         texts = list(self.rt.eval('texts').values())
@@ -319,7 +326,9 @@ def run(lua, name):
             for c in cells: api.place(a.m, c)
             if keys: a.key(*keys)
             a.draw(); worst = max(worst, a.n('cmds'))
-            assert a.n('low') >= 0 and a.n('high') <= max(w, h), (w, h, cells, a.n('low'), a.n('high'))
+            out = list(a.n('outside').values())
+            if w > 240: out += a.n('text_outside').values()                # text does not shrink to the smallest
+            assert not out, (w, h, cells, out[:3])
     print('draw commands, worst case:', worst); assert worst < 1000
     a.rt.execute('W, H = 480, 800')
 
@@ -335,6 +344,7 @@ def run(lua, name):
     assert 'boom' in api.err()
     a.rt.execute('texts = {}'); a.rt.eval('on_draw')(None, a.rt.eval('canvas')); assert 'boom' in ''.join(a.rt.eval('texts').values())
     assert a.rt.eval('on_input')(None, a.rt.table_from({'type': 'key', 'key': 'back', 'state': 'down'})) is False
+    a.rt.execute('ctx.clock.millis = function() return now end'); a.load(); a.play([5]); assert a.board() == '....X....'   # loading clears it
     print('error screen OK')
 
 

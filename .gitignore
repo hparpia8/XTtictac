@@ -5,6 +5,9 @@ touch-licorice-apps/
 dist/
 *.xtapp
 
+# flash dumps hold the reader's Wi-Fi password
+*.bin
+
 # device photos carry GPS data
 Photos/
 
