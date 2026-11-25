@@ -1,0 +1,12 @@
+# the packing toolkit, cloned here to build
+touch-licorice-apps/
+
+# built packages (attached to GitHub Releases)
+dist/
+*.xtapp
+
+# device photos carry GPS data
+Photos/
+
+.DS_Store
+*.swp
