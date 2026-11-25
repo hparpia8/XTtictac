@@ -1,0 +1,10 @@
+{
+  "app_id": "keyprobe",
+  "display_name": "Key Probe",
+  "version": "2.0.0",
+  "author": "XTtictac",
+  "description": "Developer tool: paints every on_input event in full, and tests which drawing calls work on this device.",
+  "entry": "index.lua",
+  "api": "2.0",
+  "permissions": []
+}

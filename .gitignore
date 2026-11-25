@@ -1,0 +1,15 @@
+# the packing toolkit, cloned here to build
+touch-licorice-apps/
+
+# built packages (attached to GitHub Releases)
+dist/
+*.xtapp
+
+# flash dumps hold the reader's Wi-Fi password
+*.bin
+
+# device photos carry GPS data
+Photos/
+
+.DS_Store
+*.swp
